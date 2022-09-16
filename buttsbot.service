@@ -1,0 +1,11 @@
+[Unit]
+Description=Job that runs your user script
+
+[Service]
+WorkingDirectory=/var/buttsbot-service
+ExecStart=cd buttsbot && git pull && cargo run
+Type=simple
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

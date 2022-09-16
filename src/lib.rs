@@ -1,30 +1,73 @@
 #![feature(result_option_inspect)]
+#![feature(let_chains)]
 
 pub mod buttify;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, mem};
 
 use log::{error, info, trace};
+use once_cell::sync::{Lazy, OnceCell};
 use rand::random;
 use serenity::{
     async_trait,
+    http::CacheHttp,
     model::{
         channel::Message,
         gateway::Ready,
         id::GuildId,
-        prelude::{EmojiId, ReactionType},
+        prelude::{EmojiId, ReactionType, UserId},
     },
     prelude::*,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
 use crate::buttify::buttify_sentence;
+
+static REACTS: OnceCell<Vec<ReactionType>> = OnceCell::new();
+
+static TARGETING: RwLock<Option<UserId>> = RwLock::const_new(None);
+
+async fn is_target(x: UserId, cache: impl CacheHttp) -> bool {
+    if let Some(target) = *TARGETING.read().await {
+        target == x
+    } else {
+        false
+    }
+}
 
 pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
     env_logger::init();
+
+    REACTS.set(vec![
+        ReactionType::Custom {
+            animated: false,
+            id: EmojiId::from(1016490373712977932),
+            name: Some("barbarian2".to_owned()),
+        },
+        ReactionType::Custom {
+            animated: false,
+            id: EmojiId::from(1016490373712977932),
+            name: Some("barbarian2".to_owned()),
+        },
+        ReactionType::Custom {
+            animated: false,
+            id: EmojiId::from(1016490373712977932),
+            name: Some("barbarian2".to_owned()),
+        },
+        ReactionType::Custom {
+            animated: false,
+            id: EmojiId::from(1016490373712977932),
+            name: Some("barbarian2".to_owned()),
+        },
+        ReactionType::Custom {
+            animated: false,
+            id: EmojiId::from(1015434106793885747),
+            name: Some("gregregation".to_owned()),
+        },
+    ]);
 
     // stripping the err part makes the api
     // more convenient to use as an optional
@@ -34,7 +77,9 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = env("BUTTSBOT_TOKEN")
         .expect("Requires a bot token set in BUTTSBOT_TOKEN environment variable!");
     // currently uses https://discord.com/oauth2/authorize?client_id=995608528234483713&permissions=68608&scope=bot
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT
+        | GatewayIntents::GUILD_MESSAGE_REACTIONS;
 
     let mut client = Client::builder(token, intents)
         .event_handler(Buttsbot {
@@ -93,11 +138,12 @@ impl EventHandler for Buttsbot {
         {
             msg.react(
                 &ctx,
-                ReactionType::Custom {
-                    animated: false,
-                    id: EmojiId::from(1016490373712977932),
-                    name: Some("barbarian2".to_owned()),
-                },
+                REACTS
+                    .get()
+                    .unwrap()
+                    .get((random::<f32>() * REACTS.get().unwrap().len() as f32) as usize)
+                    .expect("random of guard len not in vec")
+                    .clone(),
             )
             .await
             .inspect_err(|e| error!("failed spencing: {}", e));
@@ -143,6 +189,20 @@ impl EventHandler for Buttsbot {
                             }
                         }
                     }
+                    "target" if !is_target(msg.author.id, &ctx).await => {
+                        if let Some((_command, target_id)) = without_prefix.rsplit_once(" ")
+                        && let Ok(x) = str::parse(target_id) {
+                            if x == 995608528234483713 {
+                                msg.reply(&ctx, "hah you thought").await.ok();
+                            } else {
+
+                            mem::drop(TARGETING.write().await.insert(x));
+                            if let Err(e) = msg.channel_id.say(&ctx, "target locked").await {
+                                info!("failed to send target lock message");
+                            }
+                            }
+                        }
+                    }
                     x => {
                         if let Err(e) = msg
                             .reply(
@@ -160,11 +220,16 @@ impl EventHandler for Buttsbot {
             if let Some(guild) = msg.guild_id {
                 let mut guilds = self.guilds.lock().await;
 
-                let butt_chance = guilds
+                let mut butt_chance = guilds
                     .butt_cooldowns
                     .get(&guild)
                     .map(|last| calc_chance(Instant::now().duration_since(*last).as_secs_f32()))
                     .unwrap_or(BUTT_CHANCE);
+
+                if is_target(msg.author.id, &ctx).await {
+                    butt_chance = butt_chance.cbrt().cbrt();
+                    trace!("msg is from target");
+                }
 
                 trace!(
                     "butt chance of msg from {}: {:.2}",
@@ -189,6 +254,11 @@ impl EventHandler for Buttsbot {
                             } else {
                                 guilds.butt_cooldowns.insert(guild, Instant::now());
                             }
+                        } else {
+                            trace!(
+                                "tried to buttify \"{}\", but just turned it into \"butt\"",
+                                buttified
+                            );
                         }
                     }
                 }
