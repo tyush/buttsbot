@@ -5,6 +5,7 @@ pub mod buttify;
 
 use std::{collections::HashMap, mem};
 
+use lazy_static::lazy_static;
 use log::{error, info, trace};
 use once_cell::sync::{Lazy, OnceCell};
 use rand::random;
@@ -15,16 +16,21 @@ use serenity::{
         channel::Message,
         gateway::Ready,
         id::GuildId,
-        prelude::{EmojiId, ReactionType, UserId},
+        prelude::{ChannelId, EmojiId, Reaction, ReactionType, UserId},
     },
     prelude::*,
+    utils::MessageBuilder,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
 use crate::buttify::buttify_sentence;
 
-static REACTS: OnceCell<Vec<ReactionType>> = OnceCell::new();
+const REACT_BUFFER_SIZE: usize = 30;
+lazy_static! {
+    static ref REACTS: RwLock<Vec<ReactionType>> =
+        RwLock::new(Vec::with_capacity(REACT_BUFFER_SIZE));
+}
 
 static TARGETING: RwLock<Option<UserId>> = RwLock::const_new(None);
 
@@ -41,7 +47,8 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     env_logger::init();
 
-    REACTS.set(vec![
+    let mut guard = REACTS.write().await;
+    for i in vec![
         ReactionType::Custom {
             animated: false,
             id: EmojiId::from(1016490373712977932),
@@ -67,7 +74,10 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
             id: EmojiId::from(1015434106793885747),
             name: Some("gregregation".to_owned()),
         },
-    ]);
+    ] {
+        guard.push(i);
+    }
+    mem::drop(guard);
 
     // stripping the err part makes the api
     // more convenient to use as an optional
@@ -106,6 +116,22 @@ pub struct ButtState {
 #[async_trait]
 impl EventHandler for Buttsbot {
     async fn message(&self, ctx: Context, msg: Message) {
+        info!("{:?}", msg);
+        if msg.author.id == UserId(173247397269471242) || msg.author.name.contains("pyratic") {
+            trace!("potential command");
+            let split = msg.content.split_once(' ');
+            trace!("{:?}", split);
+            if let Some((Ok(id), msg)) = split.map(|(id, m)| (id.parse::<u64>(), m)) {
+                if let Some(ch) = ctx.cache.channel(ChannelId(id)) {
+                    trace!("{:?}", ch);
+                    let message = MessageBuilder::new().push(msg).build();
+                    if let Err(e) = ch.id().say(&ctx, message).await {
+                        error!("could not send admin message: {e}");
+                    }
+                }
+            }
+        }
+
         let prefix = {
             let lock = self.guilds.lock().await;
             msg.guild_id
@@ -122,7 +148,7 @@ impl EventHandler for Buttsbot {
         // based on time since last buttification
         // https://www.desmos.com/calculator/ie4fbaqiby
         let a = 1.0717 * f32::powi(10., -11);
-        let calc_chance = |time_since: f32| f32::min(a * time_since.powi(3), 0.1);
+        let calc_chance = |time_since: f32| f32::min(a * time_since.powi(3), 0.03);
 
         if msg.is_own(&ctx.cache) {
             return;
@@ -138,15 +164,47 @@ impl EventHandler for Buttsbot {
         {
             msg.react(
                 &ctx,
+                ReactionType::Custom {
+                    animated: false,
+                    id: EmojiId::from(1016490373712977932),
+                    name: Some("barbarian2".to_owned()),
+                },
+            )
+            .await
+            .inspect_err(|e| error!("failed spencing: {}", e));
+
+            msg.react(
+                &ctx,
                 REACTS
-                    .get()
-                    .unwrap()
-                    .get((random::<f32>() * REACTS.get().unwrap().len() as f32) as usize)
+                    .read()
+                    .await
+                    .get((random::<f32>() * REACTS.read().await.len() as f32) as usize)
                     .expect("random of guard len not in vec")
                     .clone(),
             )
             .await
             .inspect_err(|e| error!("failed spencing: {}", e));
+        }
+
+        if msg.author.id.0 == 808891538591186954
+            || msg.author.name.contains("GG1223")
+            || msg
+                .author_nick(&ctx)
+                .await
+                .map(|s| s.contains("GG1223"))
+                .unwrap_or(false)
+        {
+            for e in [
+                ReactionType::Unicode("\u{1F1F7}".to_string()),
+                ReactionType::Unicode("\u{1F1E6}".to_string()),
+                ReactionType::Unicode("\u{1F1F9}".to_string()),
+                ReactionType::Unicode("\u{1F1EE}".to_string()),
+                ReactionType::Unicode("\u{1F1F4}".to_string()),
+            ] {
+                msg.react(&ctx, e)
+                    .await
+                    .inspect_err(|e| error!("failed garing: {}", e));
+            }
         }
 
         if is_command {
@@ -227,7 +285,7 @@ impl EventHandler for Buttsbot {
                     .unwrap_or(BUTT_CHANCE);
 
                 if is_target(msg.author.id, &ctx).await {
-                    butt_chance = butt_chance.cbrt().cbrt();
+                    butt_chance = butt_chance.cbrt();
                     trace!("msg is from target");
                 }
 
@@ -264,6 +322,13 @@ impl EventHandler for Buttsbot {
                 }
             }
         }
+    }
+
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        let mut guard = REACTS.write().await;
+        guard.insert(0, reaction.emoji.clone());
+        guard.reverse();
+        guard.truncate(REACT_BUFFER_SIZE);
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {

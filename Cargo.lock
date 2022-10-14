@@ -95,6 +95,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "hypher",
+ "lazy_static",
  "log",
  "once_cell",
  "rand",
