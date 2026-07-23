@@ -38,7 +38,7 @@ pub fn syllables(word: &str) -> Vec<&str> {
     let mut last_syl_bound = 0;
     let mut was_last_vow = false;
 
-    for (i, ch) in word.chars().enumerate() {
+    for (i, ch) in word.char_indices() {
         if was_last_vow && !is_vowel(ch) {
             // this is the end of a syllable
             if word.len() - i < 2 {
@@ -61,10 +61,7 @@ pub fn syllables(word: &str) -> Vec<&str> {
 /// Returns if the vowel is a vowel or not.
 /// 'y' will be treated as a consonent.
 pub fn is_vowel(x: char) -> bool {
-    match x.to_ascii_lowercase() {
-        'a' | 'e' | 'i' | 'o' | 'u' => true,
-        _ => false,
-    }
+    matches!(x.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u')
 }
 
 #[test]
