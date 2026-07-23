@@ -8,10 +8,11 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.19", features = ["full"] }
 rand = "0.8"
-serenity = {version = "0.11", default_features = false, features = ["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend"] }
+serenity = {version = "0.12.5", default-features = false, features = ["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend"] }
 env_logger = "0.9"
 log = "0.4"
 dotenv = "0.15"
 hypher = { version = "0.1", default-features = false, features = ["english"] }
 once_cell = "1.14.0"
 lazy_static = "1.4.0"
+poise = "0.6.2"
