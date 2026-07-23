@@ -1,3 +1,4 @@
+pub mod bot_ai;
 pub mod buttify;
 pub mod commands;
 
@@ -40,6 +41,7 @@ pub async fn is_target(x: UserId, _cache: impl CacheHttp) -> bool {
 
 pub struct Data {
     pub guilds: Mutex<ButtState>,
+    pub ai: Mutex<bot_ai::AiBot>,
 }
 
 pub struct ButtState {
@@ -53,7 +55,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     let mut guard = REACTS.write().await;
-    for i in vec![
+    for i in [
         ReactionType::Custom {
             animated: false,
             id: EmojiId::from(1016490373712977932),
@@ -116,11 +118,27 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+
+                info!("Initializing AI model...");
+                let ai_bot = match bot_ai::AiBot::new().await {
+                    Ok(bot) => {
+                        info!("AI model loaded successfully");
+                        bot
+                    },
+                    Err(e) => {
+                        error!("Failed to load AI model: {}. Bot will still run but AI features will fail.", e);
+                        // We could either crash here or return a bot that panics on generation,
+                        // but crashing early is usually better if we explicitly want this feature.
+                        return Err(e.into());
+                    }
+                };
+
                 Ok(Data {
                     guilds: Mutex::new(ButtState {
                         butt_cooldowns: HashMap::new(),
                         prefix: HashMap::new(),
                     }),
+                    ai: Mutex::new(ai_bot),
                 })
             })
         })
@@ -174,6 +192,60 @@ async fn event_handler(
 
             if msg.author.id == ctx.cache.current_user().id {
                 return Ok(());
+            }
+
+            let bot_name = ctx.cache.current_user().name.clone();
+            let bot_id = ctx.cache.current_user().id;
+            if msg.content.contains(&bot_name) {
+                // Remove the bot name from the prompt to avoid it talking about itself
+                let clean_msg = msg.content.replace(&bot_name, "").trim().to_string();
+                if !clean_msg.is_empty() {
+                    // Fetch history
+                    let mut history_prompt = String::new();
+                    if let Ok(mut messages) = msg
+                        .channel_id
+                        .messages(
+                            &ctx,
+                            serenity::all::GetMessages::new().before(msg.id).limit(10),
+                        )
+                        .await
+                    {
+                        messages.reverse();
+                        for m in messages {
+                            let role = if m.author.id == bot_id {
+                                "assistant"
+                            } else {
+                                "user"
+                            };
+                            let clean_hist_msg =
+                                m.content.replace(&bot_name, "").trim().to_string();
+                            if !clean_hist_msg.is_empty() {
+                                history_prompt.push_str(&format!(
+                                    "<|im_start|>{}\n{}<|im_end|>\n",
+                                    role, clean_hist_msg
+                                ));
+                            }
+                        }
+                    }
+                    history_prompt.push_str(&format!(
+                        "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                        clean_msg
+                    ));
+
+                    let mut ai = data.ai.lock().await;
+                    let reply_text =
+                        tokio::task::block_in_place(|| match ai.generate(history_prompt) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                error!("AI generation failed: {}", e);
+                                "Oops, my brain farted.".to_string()
+                            }
+                        });
+
+                    if let Err(e) = msg.reply(&ctx, reply_text).await {
+                        error!("failed to reply with AI text: {}", e);
+                    }
+                }
             }
 
             if msg.author.id.get() == 1016490711929077780
