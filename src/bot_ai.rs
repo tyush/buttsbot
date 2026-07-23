@@ -2,6 +2,7 @@ use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::llama::{Cache, Config, Llama, LlamaConfig};
+use hf_hub::HFClient;
 use log::info;
 use tokenizers::Tokenizer;
 
@@ -15,21 +16,25 @@ pub struct AiBot {
 impl AiBot {
     pub async fn new() -> Result<Self> {
         let device = Device::Cpu;
-        let api = hf_hub::api::tokio::Api::new()?;
-        let repo = api.repo(hf_hub::Repo::with_revision(
-            "HuggingFaceTB/SmolLM-360M-Instruct".to_string(),
-            hf_hub::RepoType::Model,
-            "main".to_string(),
-        ));
+        let client = HFClient::new()?;
+        let repo = client.model("HuggingFaceTB", "SmolLM-360M-Instruct");
 
         info!("Downloading/Finding tokenizer...");
-        let tokenizer_filename = repo.get("tokenizer.json").await?;
+        let tokenizer_filename = repo
+            .download_file()
+            .filename("tokenizer.json")
+            .send()
+            .await?;
 
         info!("Downloading/Finding config...");
-        let config_filename = repo.get("config.json").await?;
+        let config_filename = repo.download_file().filename("config.json").send().await?;
 
         info!("Downloading/Finding model weights...");
-        let weights_filename = repo.get("model.safetensors").await?;
+        let weights_filename = repo
+            .download_file()
+            .filename("model.safetensors")
+            .send()
+            .await?;
 
         let tokenizer = Tokenizer::from_file(tokenizer_filename)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
@@ -56,8 +61,6 @@ impl AiBot {
         let mut cache = Cache::new(true, DType::F32, &self.config, &self.device)?;
 
         // Ensure we don't exceed token limits by encoding first, then truncating if needed
-        // Since we are passing pre-formatted prompt string now (which contains history + current message),
-        // we encode it without special tokens logic here and just truncate from the start (oldest context).
         let mut tokens = self
             .tokenizer
             .encode(prompt, true)
