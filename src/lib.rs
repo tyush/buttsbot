@@ -91,7 +91,7 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token = env("BUTTSBOT_TOKEN")
         .expect("Requires a bot token set in BUTTSBOT_TOKEN environment variable!");
-
+    // currently uses https://discord.com/oauth2/authorize?client_id=995608528234483713&permissions=68608&scope=bot
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_MESSAGE_REACTIONS;
