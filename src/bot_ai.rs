@@ -108,3 +108,18 @@ impl AiBot {
         Ok(result.trim().to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore] // Can take a while to download weights
+    async fn test_ai_bot_initialization_and_generation() {
+        let mut bot = AiBot::new().await.expect("Failed to initialize AiBot");
+        let response = bot
+            .generate("Hi".to_string())
+            .expect("Failed to generate response");
+        assert!(!response.is_empty(), "Response should not be empty");
+    }
+}
