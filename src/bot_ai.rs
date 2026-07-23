@@ -88,8 +88,12 @@ impl AiBot {
 
             // Extract the logits for the last token in the sequence to get the next token
             let logits = logits.squeeze(0)?;
-            let seq_len = logits.dim(0)?;
-            let logits = logits.get(seq_len - 1)?;
+            let logits = if logits.dims().len() > 1 {
+                let seq_len = logits.dim(0)?;
+                logits.get(seq_len - 1)?
+            } else {
+                logits
+            };
 
             // Greedy search
             let next_token = logits.argmax(0)?.to_scalar::<u32>()?;
