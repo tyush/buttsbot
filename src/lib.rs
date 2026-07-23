@@ -195,18 +195,52 @@ async fn event_handler(
             }
 
             let bot_name = ctx.cache.current_user().name.clone();
+            let bot_id = ctx.cache.current_user().id;
             if msg.content.contains(&bot_name) {
                 // Remove the bot name from the prompt to avoid it talking about itself
-                let prompt = msg.content.replace(&bot_name, "").trim().to_string();
-                if !prompt.is_empty() {
-                    let mut ai = data.ai.lock().await;
-                    let reply_text = tokio::task::block_in_place(|| match ai.generate(prompt) {
-                        Ok(text) => text,
-                        Err(e) => {
-                            error!("AI generation failed: {}", e);
-                            "Oops, my brain farted.".to_string()
+                let clean_msg = msg.content.replace(&bot_name, "").trim().to_string();
+                if !clean_msg.is_empty() {
+                    // Fetch history
+                    let mut history_prompt = String::new();
+                    if let Ok(mut messages) = msg
+                        .channel_id
+                        .messages(
+                            &ctx,
+                            serenity::all::GetMessages::new().before(msg.id).limit(10),
+                        )
+                        .await
+                    {
+                        messages.reverse();
+                        for m in messages {
+                            let role = if m.author.id == bot_id {
+                                "assistant"
+                            } else {
+                                "user"
+                            };
+                            let clean_hist_msg =
+                                m.content.replace(&bot_name, "").trim().to_string();
+                            if !clean_hist_msg.is_empty() {
+                                history_prompt.push_str(&format!(
+                                    "<|im_start|>{}\n{}<|im_end|>\n",
+                                    role, clean_hist_msg
+                                ));
+                            }
                         }
-                    });
+                    }
+                    history_prompt.push_str(&format!(
+                        "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
+                        clean_msg
+                    ));
+
+                    let mut ai = data.ai.lock().await;
+                    let reply_text =
+                        tokio::task::block_in_place(|| match ai.generate(history_prompt) {
+                            Ok(text) => text,
+                            Err(e) => {
+                                error!("AI generation failed: {}", e);
+                                "Oops, my brain farted.".to_string()
+                            }
+                        });
 
                     if let Err(e) = msg.reply(&ctx, reply_text).await {
                         error!("failed to reply with AI text: {}", e);

@@ -55,18 +55,22 @@ impl AiBot {
     pub fn generate(&mut self, prompt: String) -> Result<String> {
         let mut cache = Cache::new(true, DType::F32, &self.config, &self.device)?;
 
-        // Instruct format
-        let formatted_prompt = format!(
-            "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n",
-            prompt
-        );
-
-        let tokens = self
+        // Ensure we don't exceed token limits by encoding first, then truncating if needed
+        // Since we are passing pre-formatted prompt string now (which contains history + current message),
+        // we encode it without special tokens logic here and just truncate from the start (oldest context).
+        let mut tokens = self
             .tokenizer
-            .encode(formatted_prompt, true)
-            .map_err(|e| anyhow::anyhow!("Failed to encode: {}", e))?;
+            .encode(prompt, true)
+            .map_err(|e| anyhow::anyhow!("Failed to encode: {}", e))?
+            .get_ids()
+            .to_vec();
 
-        let mut tokens = tokens.get_ids().to_vec();
+        // Max context length for SmolLM is 2048. We'll leave 150 for generation.
+        if tokens.len() > 1850 {
+            let offset = tokens.len() - 1850;
+            tokens = tokens[offset..].to_vec();
+        }
+
         let mut generated_tokens = vec![];
 
         let max_tokens = 150;
